@@ -1,1 +1,241 @@
-import
+#FWSA-CapsNet
+import torch
+import torch.nn as nn
+from math import pi
+from torchsummary import summary
+import torch.nn.functional as F
+from thop import profile
+from torch.autograd import Variable
+
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+def Laplace(p): 
+#Laplace wavelet basis function
+    A = 0.08
+    ep = 0.03
+    tal = 0.1
+    f = 50
+    w = 2 * pi * f
+    q = torch.tensor(1 - pow(ep, 2))
+    y = A * torch.exp((-ep / (torch.sqrt(q))) * (w * (p - tal))) * (-torch.sin(w * (p - tal)))
+    return y
+
+
+class Laplace_fast(nn.Module):
+"""Laplace wavelet convolution"""
+
+    def __init__(self, out_channels, kernel_size, in_channels=1):
+
+        super(Laplace_fast, self).__init__()
+
+        if in_channels != 1:
+
+            msg = "MexhConv only support one input channel (here, in_channels = {%i})" % (in_channels)
+            raise ValueError(msg)
+
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size - 1
+
+        if kernel_size % 2 == 0:
+            self.kernel_size = self.kernel_size + 1
+
+        self.a_ = nn.Parameter((torch.linspace(1, 10, out_channels)).view(-1, 1), requires_grad=True) #scale parameter
+
+        self.b_ = nn.Parameter((torch.linspace(0, 10, out_channels)).view(-1, 1), requires_grad=True) #translation parameters
+
+
+    def forward(self, waveforms):
+
+        time_disc = torch.linspace(0, 1, steps=int((self.kernel_size)))
+
+        p1 = (time_disc.to(device) - self.b_.to(device)) / self.a_.to(device)
+
+        laplace_filter = Laplace(p1)
+
+        self.filters = (laplace_filter).view(self.out_channels, 1, self.kernel_size).to(device)
+
+
+        return F.conv1d(waveforms, self.filters, stride=1, padding=1, dilation=1, bias=None, groups=1) #Laplace wavelet convolution
+
+# --------------------------------------------------------
+
+
+def Mexh(p): 
+#Mexhat wavelet basis function
+    y = (1 - torch.pow(p, 2)) * torch.exp(-torch.pow(p, 2) / 2)
+
+    return y
+
+class Mexh_fast(nn.Module):
+"""Mexhat wavelet convolution"""
+
+    def __init__(self, out_channels, kernel_size, in_channels=1):
+
+        super(Mexh_fast, self).__init__()
+
+        if in_channels != 1:
+
+            msg = "MexhConv only support one input channel (here, in_channels = {%i})" % (in_channels)
+            raise ValueError(msg)
+
+        self.out_channels = out_channels
+
+        self.kernel_size = kernel_size - 1
+
+        if kernel_size % 2 == 0:
+            self.kernel_size = self.kernel_size + 1
+
+
+        self.a_ = nn.Parameter((torch.linspace(1, 10, out_channels)).view(-1, 1), requires_grad=True) #scale parameter
+
+        self.b_ = nn.Parameter((torch.linspace(0, 10, out_channels)).view(-1, 1), requires_grad=True) #translation parameters
+
+    def forward(self, waveforms):
+
+        time_disc_right = torch.linspace(0, (self.kernel_size / 2) - 1,
+                                         steps=int((self.kernel_size / 2)))
+
+        time_disc_left = torch.linspace(-(self.kernel_size / 2) + 1, -1,
+                                        steps=int((self.kernel_size / 2)))
+
+        p1 = time_disc_right.to(device) - self.b_.to(device) / self.a_.to(device)
+
+        p2 = time_disc_left.to(device) - self.b_.to(device) / self.a_.to(device)
+
+        Mexh_right = Mexh(p1)
+        Mexh_left = Mexh(p2)
+
+        Mexh_filter = torch.cat([Mexh_left, Mexh_right], dim=1)  # 40x1x250
+
+        self.filters = (Mexh_filter).view(self.out_channels, 1, self.kernel_size).to(device)
+
+        return F.conv1d(waveforms, self.filters, stride=1, padding=1, dilation=1, bias=None, groups=1) #Mexhat wavelet convolution
+
+# --------------------------------------------------------
+
+
+
+def Morlet(p): 
+#Morlet wavelet basis function
+    C = pow(pi, 0.25)
+    # p = 0.03 * p
+    y = C * torch.exp(-torch.pow(p, 2) / 2) * torch.cos(2 * pi * p)
+    return y
+
+class Morlet_fast(nn.Module):
+"""Morlet wavelet convolution"""
+
+    def __init__(self, out_channels, kernel_size, in_channels=1):
+
+        super(Morlet_fast, self).__init__()
+
+        if in_channels != 1:
+
+            msg = "MexhConv only support one input channel (here, in_channels = {%i})" % (in_channels)
+            raise ValueError(msg)
+
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size - 1
+
+        if kernel_size % 2 == 0:
+            self.kernel_size = self.kernel_size + 1
+
+        self.a_ = nn.Parameter((torch.linspace(1, 10, out_channels)).view(-1, 1), requires_grad=True) #scale parameter
+
+        self.b_ = nn.Parameter((torch.linspace(0, 10, out_channels)).view(-1, 1), requires_grad=True) #translation parameters
+
+    def forward(self, waveforms):
+
+        time_disc_right = torch.linspace(0, (self.kernel_size / 2) - 1,
+                                         steps=int((self.kernel_size / 2)))
+
+        time_disc_left = torch.linspace(-(self.kernel_size / 2) + 1, -1,
+                                        steps=int((self.kernel_size / 2)))
+
+        p1 = time_disc_right.to(device) - self.b_.to(device) / self.a_.to(device)
+        p2 = time_disc_left.to(device) - self.b_.to(device)/ self.a_.to(device)
+        #print('p2:', p2)
+
+        Morlet_right = Morlet(p1)
+        Morlet_left = Morlet(p2)
+
+        Morlet_filter = torch.cat([Morlet_left, Morlet_right], dim=1)  # 40x1x250
+
+        self.filters = (Morlet_filter).view(self.out_channels, 1, self.kernel_size).to(device)
+
+        return F.conv1d(waveforms, self.filters, stride=1, padding=1, dilation=1, bias=None, groups=1) #Morlet wavelet convolution
+
+# --------------------------------------------------------
+
+class DigitCaps(nn.Module):
+"""Self-attention routing capsule network"""
+    def __init__(self, num_capsules, num_routes, in_channels, out_channels):
+        super(DigitCaps, self).__init__()
+
+        self.in_channels = in_channels
+        self.num_routes = num_routes
+        self.num_capsules = num_capsules
+        self.W = nn.Parameter(torch.randn(1, num_routes, num_capsules, out_channels, in_channels))
+        self.b = nn.Parameter(torch.zeros(1, num_routes, num_capsules, 1))
+        self.dropout = nn.Dropout(0.5)
+
+    def forward(self, x):
+        # Calculate the intermediate vector u
+        x = torch.stack([x] * self.num_capsules, dim=2).unsqueeze(4)
+        u_hat = torch.matmul(self.W, x).squeeze(-1)  # Input x undergoes spatial mapping through W, encoding the spatial relationships between low-level and high-level features in the image.
+
+        #Self-attention routing
+        a_ij = torch.einsum('...ij,...kj->...i', u_hat, u_hat)
+        A_ij = a_ij / torch.sqrt(torch.tensor(self.in_channels))
+        A_ij, _ = torch.max(A_ij, dim=0, keepdim=True)
+        c_ij = F.softmax(A_ij, dim=1).unsqueeze(3)
+        c_ij = c_ij + self.b
+        c_ij = F.softmax(c_ij, dim=1)
+        s_j = (c_ij * u_hat).sum(dim=1, keepdim=True)  # weighted sum
+        v_j = self.squash(s_j) 
+        v_j = self.dropout(v_j)
+        return v_j.squeeze(1), c_ij# Output capsule features and confusion matrix
+
+    def squash(self, input_tensor):
+        squared_norm = torch.norm(input_tensor, dim=-1, keepdim=True)
+        output_tensor = (input_tensor / squared_norm) ** 2 / (1 + squared_norm ** 2) * squared_norm
+
+
+class FWSA-CapsNet(nn.Module):
+    def __init__(self, in_channel=1, out_channel=4):
+        super(CapsNet, self).__init__()
+        self.conv1_1 = nn.Sequential(
+            Laplace_fast(16, 16),
+            nn.BatchNorm1d(16),
+            nn.Tanh(),
+            nn.MaxPool1d(kernel_size=32, stride=32, padding=8),
+        )
+        self.conv1_2 = nn.Sequential(
+            Mexh_fast(16, 16),
+            nn.BatchNorm1d(16),
+            nn.Tanh(),
+            nn.MaxPool1d(kernel_size=32, stride=32, padding=8),
+        )
+        self.conv1_3 = nn.Sequential(
+            Morlet_fast(16, 16),
+            nn.BatchNorm1d(16),
+            nn.Tanh(),
+            nn.MaxPool1d(kernel_size=32, stride=32, padding=8),
+        )
+
+        self.digit_capsules_1 = DigitCaps(num_capsules=16, num_routes=48, in_channels=32, out_channels=16) #1Capsule Layer-1
+        self.digit_capsules_2 = DigitCaps(num_capsules=out_channel, num_routes=16, in_channels=16, out_channels=8) # Capsule Layer-2
+
+
+    def forward(self, x):
+        x_1 = self.conv1_1(x)
+        x_2 = self.conv1_2(x)
+        x_3 = self.conv1_3(x)
+        x = torch.cat((x_1, x_2, x_3), dim=1) # Fusion of multiple wavelet convolution features
+        x, c1= self.digit_capsules_1(x)
+        x = torch.squeeze(x, dim=-1)
+        CO, c2 = self.digit_capsules_2(x) #2*16
+        x =torch.norm(CO, p=2, dim=2)  # L2 classifier
+        logits = torch.squeeze(x, dim=-1)
+        probas = F.softmax(logits, dim=1)
+        return logits, probas, c1, c2 # Confusion matrix of c1 and c2
