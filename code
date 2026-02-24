@@ -154,7 +154,6 @@ class Morlet_fast(nn.Module):
 
         p1 = time_disc_right.to(device) - self.b_.to(device) / self.a_.to(device)
         p2 = time_disc_left.to(device) - self.b_.to(device)/ self.a_.to(device)
-        #print('p2:', p2)
 
         Morlet_right = Morlet(p1)
         Morlet_left = Morlet(p2)
