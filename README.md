@@ -13,4 +13,5 @@ Validation on public Jiangnan University bearing dataset
 
 # Cite this article
 FWSA-CapsNet: An interpretable intelligent fault diagnosis method for industrial robots
+
 Paper link: Update the link after the article is published
