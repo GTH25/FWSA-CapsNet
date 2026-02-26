@@ -2,14 +2,12 @@
 import torch
 import torch.nn as nn
 from math import pi
-from torchsummary import summary
 import torch.nn.functional as F
-from thop import profile
-from torch.autograd import Variable
+
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-def Laplace(p): 
+def Laplace(p):
 #Laplace wavelet basis function
     A = 0.08
     ep = 0.03
@@ -22,8 +20,7 @@ def Laplace(p):
 
 
 class Laplace_fast(nn.Module):
-"""Laplace wavelet convolution"""
-
+    """Laplace wavelet convolution"""
     def __init__(self, out_channels, kernel_size, in_channels=1):
 
         super(Laplace_fast, self).__init__()
@@ -60,14 +57,14 @@ class Laplace_fast(nn.Module):
 # --------------------------------------------------------
 
 
-def Mexh(p): 
+def Mexh(p):
 #Mexhat wavelet basis function
     y = (1 - torch.pow(p, 2)) * torch.exp(-torch.pow(p, 2) / 2)
 
     return y
 
 class Mexh_fast(nn.Module):
-"""Mexhat wavelet convolution"""
+    """Mexhat wavelet convolution"""
 
     def __init__(self, out_channels, kernel_size, in_channels=1):
 
@@ -115,7 +112,7 @@ class Mexh_fast(nn.Module):
 
 
 
-def Morlet(p): 
+def Morlet(p):
 #Morlet wavelet basis function
     C = pow(pi, 0.25)
     # p = 0.03 * p
@@ -123,7 +120,7 @@ def Morlet(p):
     return y
 
 class Morlet_fast(nn.Module):
-"""Morlet wavelet convolution"""
+    """Morlet wavelet convolution"""
 
     def __init__(self, out_channels, kernel_size, in_channels=1):
 
@@ -167,7 +164,7 @@ class Morlet_fast(nn.Module):
 # --------------------------------------------------------
 
 class DigitCaps(nn.Module):
-"""Self-attention routing capsule network"""
+    """Self-attention routing capsule network"""
     def __init__(self, num_capsules, num_routes, in_channels, out_channels):
         super(DigitCaps, self).__init__()
 
@@ -181,7 +178,8 @@ class DigitCaps(nn.Module):
     def forward(self, x):
         # Calculate the intermediate vector u
         x = torch.stack([x] * self.num_capsules, dim=2).unsqueeze(4)
-        u_hat = torch.matmul(self.W, x).squeeze(-1)  # Input x undergoes spatial mapping through W, encoding the spatial relationships between low-level and high-level features in the image.
+        u_hat = torch.matmul(self.W, x).squeeze(-1)  # 输入x通过W进行空间映射，编码图像中低级和高级特征之间的空间关系
+
 
         #Self-attention routing
         a_ij = torch.einsum('...ij,...kj->...i', u_hat, u_hat)
@@ -191,38 +189,41 @@ class DigitCaps(nn.Module):
         c_ij = c_ij + self.b
         c_ij = F.softmax(c_ij, dim=1)
         s_j = (c_ij * u_hat).sum(dim=1, keepdim=True)  # weighted sum
-        v_j = self.squash(s_j) 
+        v_j = self.squash(s_j)
         v_j = self.dropout(v_j)
-        return v_j.squeeze(1), c_ij# Output capsule features and confusion matrix
+        return v_j.squeeze(1), c_ij # Output capsule features and confusion matrix
+
+
 
     def squash(self, input_tensor):
         squared_norm = torch.norm(input_tensor, dim=-1, keepdim=True)
         output_tensor = (input_tensor / squared_norm) ** 2 / (1 + squared_norm ** 2) * squared_norm
+        return output_tensor
 
 
-class FWSA-CapsNet(nn.Module):
+class FWSACapsNet(nn.Module):
     def __init__(self, in_channel=1, out_channel=4):
-        super(CapsNet, self).__init__()
+        super(FWSACapsNet, self).__init__()
         self.conv1_1 = nn.Sequential(
             Laplace_fast(16, 16),
             nn.BatchNorm1d(16),
             nn.Tanh(),
-            nn.MaxPool1d(kernel_size=32, stride=32, padding=8),
+            nn.AdaptiveMaxPool1d(64),
         )
         self.conv1_2 = nn.Sequential(
             Mexh_fast(16, 16),
             nn.BatchNorm1d(16),
             nn.Tanh(),
-            nn.MaxPool1d(kernel_size=32, stride=32, padding=8),
+            nn.AdaptiveMaxPool1d(64),
         )
         self.conv1_3 = nn.Sequential(
             Morlet_fast(16, 16),
             nn.BatchNorm1d(16),
             nn.Tanh(),
-            nn.MaxPool1d(kernel_size=32, stride=32, padding=8),
+            nn.AdaptiveMaxPool1d(64),
         )
 
-        self.digit_capsules_1 = DigitCaps(num_capsules=16, num_routes=48, in_channels=32, out_channels=16) #1Capsule Layer-1
+        self.digit_capsules_1 = DigitCaps(num_capsules=16, num_routes=48, in_channels=64, out_channels=16) #1Capsule Layer-1
         self.digit_capsules_2 = DigitCaps(num_capsules=out_channel, num_routes=16, in_channels=16, out_channels=8) # Capsule Layer-2
 
 
@@ -230,7 +231,7 @@ class FWSA-CapsNet(nn.Module):
         x_1 = self.conv1_1(x)
         x_2 = self.conv1_2(x)
         x_3 = self.conv1_3(x)
-        x = torch.cat((x_1, x_2, x_3), dim=1) # Fusion of multiple wavelet convolution features
+        x = torch.cat((x_1, x_2, x_3), dim=1)
         x, c1= self.digit_capsules_1(x)
         x = torch.squeeze(x, dim=-1)
         CO, c2 = self.digit_capsules_2(x) #2*16
