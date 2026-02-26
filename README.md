@@ -6,6 +6,7 @@ Code for FWSA-CapsNet: An interpretable intelligent fault diagnosis method for i
 
 # Visualization of experimental results
 Validation on public Jiangnan University bearing dataset
+
 <img width="269" height="239" alt="image" src="https://github.com/user-attachments/assets/cb9e6361-94d6-4701-9d19-337ae59895fb" />
 <img width="286" height="239" alt="image" src="https://github.com/user-attachments/assets/e0ec88fd-b74d-44c0-9661-c7f02236c7d3" />
 
