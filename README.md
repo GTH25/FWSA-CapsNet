@@ -15,3 +15,11 @@ Validation on public Jiangnan University bearing dataset
 FWSA-CapsNet: An interpretable intelligent fault diagnosis method for industrial robots
 
 Paper link: Update the link after the article is published
+
+# Environment Configuration
+During the model training and testing process, the computer configuration and software versions are as follows:
+CPU: Intel Core i7-12700
+Python: 3.11
+Deep Learning Framework: PyTorch 2.1.2
+IDE: PyCharm Community 2023.3.1
+Operating System: Windows 10 64-bit
